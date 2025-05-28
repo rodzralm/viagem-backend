@@ -48,6 +48,9 @@ def enviar_whatsapp(numero_destino, mensagem):
         body=mensagem_limitada
     )
 
+# Memória temporária para contexto
+ultima_solicitacao = {}
+
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
     data = await request.form()
@@ -56,16 +59,39 @@ async def whatsapp_webhook(request: Request):
 
     print(f"Mensagem recebida de {numero_remetente}: {mensagem_recebida}")
 
-    # Ler tabelas Airtable
+    # Ler tabelas Airtable com tratamento de erro
     contexto_airtable = {}
+    erro_airtable = False
+
     try:
         for nome_tabela, cliente_tabela in tabelas_airtable.items():
             records = cliente_tabela.get_all()
             contexto_airtable[nome_tabela] = [record['fields'] for record in records]
     except Exception as e:
+        erro_airtable = True
         contexto_airtable = f"Erro ao acessar Airtable: {e}"
 
-    # Classificação inicial da mensagem
+    if erro_airtable:
+        resposta = f"GOSTOSO, tivemos um erro ao acessar o Airtable: {contexto_airtable}. Por favor verifique isso antes de continuar!"
+        enviar_whatsapp(numero_remetente, resposta)
+        return JSONResponse(content={"message": resposta}, status_code=500)
+
+    if mensagem_recebida.strip().lower() in ["ok", "sim"]:
+        if numero_remetente in ultima_solicitacao:
+            solicitacao = ultima_solicitacao[numero_remetente]
+            try:
+                tabelas_airtable[solicitacao["tabela"]].insert(solicitacao["dados"])
+                resposta_final = "Prontinho, gostoso! Atualizei as informações no Airtable como combinado."
+            except Exception as e:
+                resposta_final = f"Erro ao atualizar no Airtable: {e}"
+
+            del ultima_solicitacao[numero_remetente]
+        else:
+            resposta_final = "Gostoso, não encontrei nenhuma atualização pendente. Me manda novamente?"
+
+        enviar_whatsapp(numero_remetente, resposta_final)
+        return JSONResponse(content={"message": resposta_final}, status_code=200)
+
     classificacao_openai = openai_client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
@@ -77,24 +103,24 @@ async def whatsapp_webhook(request: Request):
     tipo_mensagem = classificacao_openai.choices[0].message.content.strip().lower()
 
     if tipo_mensagem == "atualizacao":
-        # Solicita validação antes de atualizar
         validacao = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": f"{prompt_viagem}\nIdentifique qual tabela e campos devem ser atualizados e solicite confirmação para o Rodz."},
+                {"role": "system", "content": f"{prompt_viagem}\nIdentifique claramente a tabela, os campos, valores completos, e valide tudo com Rodz antes de salvar."},
                 {"role": "user", "content": mensagem_recebida}
             ]
         )
         resposta_validacao = validacao.choices[0].message.content.strip()
+
+        # Salva contexto da solicitação pendente
+        ultima_solicitacao[numero_remetente] = {
+            "tabela": "presentes",  # aqui você deve implementar lógica dinâmica
+            "dados": {"Observações": mensagem_recebida}  # idem acima
+        }
+
         enviar_whatsapp(numero_remetente, resposta_validacao)
 
-    elif mensagem_recebida.strip().lower() == "ok":
-        # Após confirmação, atualiza Airtable (implemente explicitamente conforme necessário)
-        resposta_final = "Prontinho, gostoso! Atualizei as informações no Airtable como combinado."
-        # Aqui você deve implementar o código específico para atualizar a tabela correta.
-        enviar_whatsapp(numero_remetente, resposta_final)
-
-    else:  # Para consultas ou outras mensagens
+    else:
         resposta_openai = openai_client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
