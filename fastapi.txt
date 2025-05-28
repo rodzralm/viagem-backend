@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+openai
+twilio
+airtable-python-wrapper
+pydantic
+requests
