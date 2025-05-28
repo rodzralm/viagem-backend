@@ -38,6 +38,16 @@ tabelas_airtable = {
 with open('prompt_viagem.txt', 'r', encoding='utf-8') as file:
     prompt_viagem = file.read()
 
+# Função centralizada para enviar WhatsApp
+
+def enviar_whatsapp(numero_destino, mensagem):
+    mensagem_limitada = mensagem[:1500]
+    client.messages.create(
+        from_='whatsapp:' + TWILIO_NUMERO_WHATSAPP,
+        to=numero_destino,
+        body=mensagem_limitada
+    )
+
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
     data = await request.form()
@@ -76,23 +86,13 @@ async def whatsapp_webhook(request: Request):
             ]
         )
         resposta_validacao = validacao.choices[0].message.content.strip()
-
-        client.messages.create(
-            from_='whatsapp:' + TWILIO_NUMERO_WHATSAPP,
-            to=numero_remetente,
-            body=resposta_validacao
-        )
+        enviar_whatsapp(numero_remetente, resposta_validacao)
 
     elif mensagem_recebida.strip().lower() == "ok":
         # Após confirmação, atualiza Airtable (implemente explicitamente conforme necessário)
         resposta_final = "Prontinho, gostoso! Atualizei as informações no Airtable como combinado."
         # Aqui você deve implementar o código específico para atualizar a tabela correta.
-
-        client.messages.create(
-            from_='whatsapp:' + TWILIO_NUMERO_WHATSAPP,
-            to=numero_remetente,
-            body=resposta_final
-        )
+        enviar_whatsapp(numero_remetente, resposta_final)
 
     else:  # Para consultas ou outras mensagens
         resposta_openai = openai_client.chat.completions.create(
@@ -103,12 +103,6 @@ async def whatsapp_webhook(request: Request):
             ]
         )
         resposta = resposta_openai.choices[0].message.content.strip()
-
-        client.messages.create(
-            from_='whatsapp:' + TWILIO_NUMERO_WHATSAPP,
-            to=numero_remetente,
-            body=resposta
-        )
+        enviar_whatsapp(numero_remetente, resposta)
 
     return JSONResponse(content={"message": "Processado com sucesso"}, status_code=200)
-
