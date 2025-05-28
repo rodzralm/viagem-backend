@@ -55,22 +55,60 @@ async def whatsapp_webhook(request: Request):
     except Exception as e:
         contexto_airtable = f"Erro ao acessar Airtable: {e}"
 
-    # Gerar resposta da OpenAI
-    resposta_openai = openai_client.chat.completions.create(
+    # Classificação inicial da mensagem
+    classificacao_openai = openai_client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
-            {"role": "system", "content": f"{prompt_viagem}\nDados atuais Airtable:\n{contexto_airtable}"},
+            {"role": "system", "content": f"{prompt_viagem}\nClassifique claramente esta mensagem como 'consulta', 'atualizacao' ou 'outro':"},
             {"role": "user", "content": mensagem_recebida}
         ]
     )
 
-    resposta = resposta_openai.choices[0].message.content.strip()
+    tipo_mensagem = classificacao_openai.choices[0].message.content.strip().lower()
 
-    # Enviar resposta via Twilio WhatsApp
-    client.messages.create(
-        from_='whatsapp:' + TWILIO_NUMERO_WHATSAPP,
-        to=numero_remetente,
-        body=resposta
-    )
+    if tipo_mensagem == "atualizacao":
+        # Solicita validação antes de atualizar
+        validacao = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": f"{prompt_viagem}\nIdentifique qual tabela e campos devem ser atualizados e solicite confirmação para o Rodz."},
+                {"role": "user", "content": mensagem_recebida}
+            ]
+        )
+        resposta_validacao = validacao.choices[0].message.content.strip()
 
-    return JSONResponse(content={"message": resposta}, status_code=200)
+        client.messages.create(
+            from_='whatsapp:' + TWILIO_NUMERO_WHATSAPP,
+            to=numero_remetente,
+            body=resposta_validacao
+        )
+
+    elif mensagem_recebida.strip().lower() == "ok":
+        # Após confirmação, atualiza Airtable (implemente explicitamente conforme necessário)
+        resposta_final = "Prontinho, gostoso! Atualizei as informações no Airtable como combinado."
+        # Aqui você deve implementar o código específico para atualizar a tabela correta.
+
+        client.messages.create(
+            from_='whatsapp:' + TWILIO_NUMERO_WHATSAPP,
+            to=numero_remetente,
+            body=resposta_final
+        )
+
+    else:  # Para consultas ou outras mensagens
+        resposta_openai = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": f"{prompt_viagem}\nDados atuais Airtable:\n{contexto_airtable}"},
+                {"role": "user", "content": mensagem_recebida}
+            ]
+        )
+        resposta = resposta_openai.choices[0].message.content.strip()
+
+        client.messages.create(
+            from_='whatsapp:' + TWILIO_NUMERO_WHATSAPP,
+            to=numero_remetente,
+            body=resposta
+        )
+
+    return JSONResponse(content={"message": "Processado com sucesso"}, status_code=200)
+
